@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="zh" data-theme="ink">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashes</title>
+<link rel="icon" href="favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preload" href="vendor/globe.gl-2.46.2.min.js" as="script">
+<link rel="preload" href="vendor/countries-110m.json" as="fetch" type="application/json">
+<style>
+  /* ==================== 配色：直接改这里 ====================
+     墨 = 默认深色，纸 = 浅色。改完保存、刷新页面就能看到。
+     --ocean / --land 请用实色（#xxxxxx），不要用带透明度的 rgba。
+     --accent 是西方主线和所有强调色。                          */
+  :root[data-theme="ink"]{
+    --bg:#141311;             /* 页面背景 */
+    --ink:#ece6d8;            /* 主要文字 */
+    --muted:#9a9282;          /* 次要文字 */
+    --faint:#47423b;          /* 很淡的线（时间轴底线、站点竖线） */
+    --card:rgba(30,28,26,.9); /* 面板背景 */
+    --line:#34302b;           /* 面板边框、分割线 */
+    --labelbg:rgba(20,19,17,.8);  /* 地球上站名的底色 */
+    --sb:rgba(236,230,216,.25);   /* 滚动条 */
+    --chiptext:#1a1814;       /* “第 n 站”标签里的文字 */
+    --accent:#d9a752;         /* 西方主线 / 强调色 */
+    --legend:#a59b88;         /* 传说路线 */
+    --anchor:#7d766a;         /* 待展开源流的灰点 */
+    --ocean:#1a1917;          /* 海洋 */
+    --land:#2c2925;           /* 陆地 */
+    --land-line:#4a443b;      /* 海岸线 */
+    --border:rgba(120,110,94,.55); /* 国界线 */
+    --atmo:#8a6d3b;           /* 地球外圈的光晕 */
+  }
+  :root[data-theme="paper"]{
+    --bg:#f3efe6; --ink:#2b2822; --muted:#8a8274; --faint:#c9c0ad;
+    --card:rgba(250,248,242,.92); --line:#ddd5c4; --labelbg:rgba(243,239,230,.85);
+    --sb:rgba(43,40,34,.22); --chiptext:#fff;
+    --accent:#9a3d2b; --legend:#6e6455; --anchor:#9b9384;
+    --ocean:#f0ebe0; --land:#d9cfba; --land-line:#bdb199; --border:rgba(150,136,108,.5); --atmo:#d8ccb2;
+  }
+  /* 右上角两个配色小圆点的颜色 */
+  #themes button[data-t="ink"]{background:#141311}
+  #themes button[data-t="ink"] span{background:#d9a752}
+  #themes button[data-t="paper"]{background:#f3efe6}
+  #themes button[data-t="paper"] span{background:#9a3d2b}
+  /* ========================================================== */
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,"PingFang SC","Hiragino Sans GB","Noto Sans SC",sans-serif;overflow:hidden;transition:background .5s,color .5s}
+  button{font-family:inherit}
+  #globe{position:fixed;inset:0}
+
+  header{position:fixed;top:20px;left:24px;pointer-events:none}
+  header h1{margin:0;font-family:Georgia,"Songti SC",serif;font-weight:400;font-size:28px;letter-spacing:.02em}
+  header p{margin:2px 0 0;font-size:13px;color:var(--muted)}
+
+  /* 右上角：语言 + 配色 */
+  #topbar{position:fixed;top:26px;right:24px;display:flex;align-items:center;gap:18px;font-size:12px;color:var(--muted)}
+  #langs{display:flex;align-items:center;gap:4px}
+  #langs button{border:none;background:none;padding:2px 4px;font-size:12px;color:var(--muted);cursor:pointer}
+  #langs button.on{color:var(--ink);font-weight:500}
+  #themes{display:flex;align-items:center;gap:10px}
+  #themes button{width:18px;height:18px;border-radius:50%;border:1px solid var(--line);cursor:pointer;padding:0;position:relative}
+  #themes button.on{box-shadow:0 0 0 2px var(--bg),0 0 0 3px var(--ink)}
+  #themes button span{position:absolute;inset:4px;border-radius:50%}
+
+  .panel{position:fixed;background:var(--card);border:1px solid var(--line);border-radius:10px;backdrop-filter:blur(6px);transition:background .5s,border-color .5s}
+
+  /* 滚动区域：鼠标进入整块区域时滚动条淡入，离开时淡出 */
+  .sc{overflow:auto;border-color:transparent;transition:border-color .35s}
+  .sc:hover{border-color:var(--sb)}
+  .sc::-webkit-scrollbar{width:6px;height:6px}
+  .sc::-webkit-scrollbar-track,.sc::-webkit-scrollbar-corner{background:transparent}
+  .sc::-webkit-scrollbar-thumb{border-radius:3px;border-right-style:inset;border-right-width:calc(100vw + 100vh);border-color:inherit}
+  @supports (-moz-appearance:none){
+    .sc{scrollbar-width:thin;scrollbar-color:transparent transparent}
+    .sc:hover{scrollbar-color:var(--sb) transparent}
+  }
+
+  /* 左侧：全部源流 */
+  #lines{top:92px;left:24px;width:228px;padding:10px 0 8px;transition:transform .4s ease,opacity .4s,background .5s,border-color .5s}
+  #lines.folded{transform:translateX(calc(-100% - 30px));opacity:0;pointer-events:none}
+  #lines .lbl{font-size:11px;color:var(--muted);padding:2px calc(16px + var(--sbw, 6px)) 6px 10px;display:flex;align-items:center;gap:2px}
+  #lines .lbl .lt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #lines .lctl{display:flex;align-items:center;flex:none}
+  #lines .allbox{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--muted);cursor:pointer;user-select:none;white-space:nowrap}
+  #lines .allbox:hover{color:var(--ink)}
+  #lines .lscroll{max-height:calc(100vh - 260px);padding:0 6px}
+  .cbx{appearance:none;-webkit-appearance:none;width:13px;height:13px;border:1px solid var(--muted);border-radius:3px;background:transparent;cursor:pointer;flex:none;margin:0;padding:0;transition:background .15s,border-color .15s}
+  .cbx:hover{border-color:var(--ink)}
+  .cbx:checked{background-color:var(--muted);border-color:var(--muted);background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.2 4.9 8.6 9.5 3.6' fill='none' stroke='%23f3efe6' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-size:9px 9px;background-position:center;background-repeat:no-repeat}
+  .cbx:focus-visible{outline:1px solid var(--accent);outline-offset:2px}
+  #fold{border:none;background:none;color:var(--muted);cursor:pointer;font-size:16px;line-height:1;padding:0;width:20px;height:20px;display:flex;align-items:center;justify-content:center;flex:none}
+  #fold:hover,#unfold:hover{color:var(--ink)}
+  #unfold{position:fixed;top:92px;left:0;padding:8px 12px 8px 14px;border:1px solid var(--line);border-left:none;border-radius:0 8px 8px 0;background:var(--card);font-size:12px;color:var(--muted);cursor:pointer;opacity:0;pointer-events:none;transition:opacity .4s}
+  #unfold.show{opacity:1;pointer-events:auto}
+  .ln{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:13px}
+  .ln:hover{background:rgba(128,128,128,.08)}
+  .ln.on{background:rgba(128,128,128,.11)}
+  .ln .dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .ln .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ln .vis{margin-left:2px}
+  .ln .st{margin-left:auto;font-size:11px;color:var(--muted)}
+  .ln.todo{color:var(--muted)}
+
+  /* 右侧：详情 */
+  #detail{top:92px;right:24px;width:600px;padding:0;overflow:hidden;display:none}
+  #detail.show{display:block}
+  #close{position:absolute;top:10px;right:18px;z-index:2;border:none;background:none;font-size:16px;color:var(--muted);cursor:pointer}
+  #close:hover{color:var(--ink)}
+  #detail .dwrap{display:grid;grid-template-columns:200px 1fr}
+  #detail .side,#detail .main{max-height:calc(100vh - 240px)}
+  #detail .side{position:relative;padding:18px 12px 18px 16px}
+  #detail .main{padding:18px 26px 22px 22px;box-shadow:inset 1px 0 0 var(--line)}
+  #detail .cnt{font-size:11px;color:var(--muted);margin-bottom:10px}
+  #detail .chip{display:inline-block;font-size:11px;padding:2px 8px;border-radius:99px;color:var(--chiptext)}
+  #detail h2{margin:10px 0 2px;font-size:18px;font-weight:500}
+  #detail .meta{font-size:13px;color:var(--muted)}
+  #detail .sec{margin-top:16px;font-size:13px;line-height:1.75}
+  #detail .sec>b,#detail .hd{display:block;font-weight:500;font-size:12px;color:var(--muted);margin-bottom:4px}
+  #detail .vs{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px}
+  #detail .vs div{font-size:12px;line-height:1.6;padding:8px 10px;border-radius:6px;background:rgba(128,128,128,.08)}
+  #detail .vs b{display:block;font-weight:500;color:var(--muted);margin-bottom:2px}
+  #detail ul{margin:0;padding-left:18px}
+  #detail .empty{color:var(--muted);font-style:italic}
+
+  /* 站点列表 */
+  #detail .stl{position:relative;list-style:none;margin:0;padding:0}
+  #detail .stl::before{content:'';position:absolute;left:10px;top:14px;bottom:14px;width:1px;margin-left:-.5px;background:var(--faint)}
+  #detail .stl li{position:relative;font-size:12px;line-height:1.4;padding:4px 0 9px 32px;cursor:pointer}
+  #detail .stl li .n{position:absolute;left:0;top:4px;width:20px;height:20px;border-radius:50%;border:1px solid var(--muted);background:var(--bg);font-size:10px;line-height:18px;text-align:center;color:var(--muted);font-weight:400}
+  #detail .stl li .y{display:block;font-size:10px;color:var(--muted)}
+  #detail .stl li:hover{color:var(--accent)}
+  #detail .stl li:hover .n{border-color:var(--accent);color:var(--accent)}
+  #detail .stl li.on{font-weight:500}
+  #detail .stl li.on .n{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+  #detail .stl li.later{opacity:.45}
+
+  /* 传递说明 */
+  #detail .tr{padding:10px 12px;border-radius:8px;background:rgba(128,128,128,.07);margin-top:8px}
+  #detail .tr.legend{background:none;border:1px dashed var(--faint)}
+  #detail .go{border:none;background:none;padding:0;font-size:13px;font-weight:500;color:var(--ink);cursor:pointer;text-align:left}
+  #detail .go:hover{color:var(--accent)}
+  #detail .go .nn{display:inline-block;min-width:18px;height:18px;margin-right:6px;border-radius:50%;border:1px solid var(--muted);font-size:10px;line-height:16px;text-align:center;color:var(--muted);font-weight:400;vertical-align:1px}
+  #detail .tr p{margin:6px 0 0;font-size:12.5px;line-height:1.7}
+  #detail .tr .why{color:var(--muted)}
+  #detail .tr .why b{font-weight:500;margin-right:6px}
+  #detail .tag{display:inline-block;font-size:11px;padding:1px 8px;border-radius:99px;border:1px solid var(--faint);color:var(--muted);margin:6px 6px 0 0}
+  #detail .outs{display:flex;flex-wrap:wrap;gap:6px 14px}
+
+  /* 底部时间轴 */
+  #time{left:24px;right:24px;bottom:20px;padding:12px 18px 10px;display:flex;align-items:center;gap:16px}
+  #play{width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:none;cursor:pointer;font-size:12px;color:var(--ink);flex:none}
+  #year{width:120px;flex:none;font-family:Georgia,"Songti SC",serif;font-size:18px}
+  #track{position:relative;flex:1;height:38px;cursor:pointer;touch-action:none}
+  #track .bar{position:absolute;left:0;right:0;top:14px;height:2px;background:var(--faint);border-radius:2px}
+  #track .fill{position:absolute;left:0;top:14px;height:2px;background:var(--ink);border-radius:2px}
+  #track .knob{position:absolute;top:8px;width:14px;height:14px;margin-left:-7px;border-radius:50%;background:var(--ink);z-index:2}
+  #track .tick{position:absolute;top:26px;font-size:10px;color:var(--muted);transform:translateX(-50%);white-space:nowrap}
+  #track .mk{position:absolute;top:11px;width:2px;height:8px;margin-left:-1px;border-radius:1px}
+  #track .ev{position:absolute;top:0;width:7px;height:7px;margin-left:-3.5px;transform:rotate(45deg);border:1px solid var(--muted);background:var(--bg);opacity:.75}
+  #track .ev:hover{opacity:1;border-color:var(--ink)}
+  #tip{position:fixed;z-index:20;pointer-events:none;max-width:260px;padding:8px 10px;border-radius:6px;background:var(--card);border:1px solid var(--line);font-size:12px;line-height:1.6;color:var(--ink);opacity:0;transition:opacity .15s}
+  #tip b{font-weight:500}
+  #tip span{display:block;color:var(--muted)}
+
+  /* 图例：在详情卡片和时间轴之间的空白处，不放进任何容器 */
+  #legend i{font-style:normal}
+  #legend{position:fixed;right:28px;bottom:92px;display:flex;gap:18px;font-size:11px;color:var(--muted);white-space:nowrap;pointer-events:none}
+  #legend .lg{display:inline-block;width:24px;vertical-align:middle;margin-right:6px}
+  #legend .k{border-top:2px dashed var(--accent)}
+  #legend .l{border-top:2px dotted var(--legend)}
+  #legend .e{display:inline-block;width:7px;height:7px;margin:0 8px 0 4px;transform:rotate(45deg);border:1px solid var(--muted);vertical-align:1px}
+
+  /* 地球上的站点 */
+  .pin{position:relative;width:10px;height:10px;cursor:pointer;pointer-events:auto;transition:opacity .4s}
+  .pin:hover{opacity:1!important}
+  .pin .d{position:absolute;left:50%;top:50%;width:10px;height:10px;transform:translate(-50%,-50%);border-radius:50%;background:var(--c);border:2px solid var(--bg);transition:width .3s,height .3s}
+  .pin .t{position:absolute;left:14px;top:50%;transform:translateY(-50%);font-size:12px;white-space:nowrap;background:var(--labelbg);color:var(--ink);padding:1px 6px;border-radius:4px;display:none}
+  .pin.lab .t,.pin:hover .t,.pin.sel .t{display:block}
+  .pin.sel .t{left:20px}
+  .pin.todo .d{width:8px;height:8px;opacity:.7}
+  .pin.todo .t{color:var(--muted)}
+  /* 选中：柔和的光晕呼吸 + 一圈细细的光波 */
+  .pin.sel{z-index:5}
+  .pin.sel .d{width:12px;height:12px}
+  .pin.sel::before{content:'';position:absolute;left:50%;top:50%;width:64px;height:64px;margin:-32px 0 0 -32px;border-radius:50%;
+    background:radial-gradient(circle,rgba(var(--cr),.5) 0,rgba(var(--cr),.2) 30%,rgba(var(--cr),0) 68%);animation:breathe 3s ease-in-out infinite;pointer-events:none}
+  .pin.sel::after{content:'';position:absolute;left:50%;top:50%;width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:50%;border:1px solid rgba(var(--cr),.9);animation:ripple 3s ease-out infinite;pointer-events:none}
+  @keyframes breathe{0%,100%{transform:scale(.7);opacity:.65}50%{transform:scale(1.05);opacity:1}}
+  @keyframes ripple{0%{transform:scale(1);opacity:.9}100%{transform:scale(4.5);opacity:0}}
+
+  /* 版权声明：页面最底部，很小 */
+  #license{position:fixed;right:28px;bottom:4px;font-size:10px;color:var(--muted);opacity:.7}
+  #license a{color:inherit}
+  #license:hover{opacity:1}
+
+  /* 指北针：回到正北、正常倾角 */
+  #compass{position:fixed;left:24px;bottom:94px;width:38px;height:38px;border-radius:50%;border:1px solid var(--line);background:var(--card);color:var(--muted);cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center;transition:background .5s,border-color .5s}
+  #compass:hover{color:var(--ink);border-color:var(--muted)}
+  #compass svg{width:24px;height:24px}
+
+  .float-tooltip-kap{font-family:inherit!important;font-size:12px!important;background:var(--card)!important;color:var(--ink)!important;border:1px solid var(--line);border-radius:6px!important;padding:6px 9px!important;z-index:1000!important;pointer-events:none!important}
+
+  @media (max-width:760px){
+    #lines,#unfold,#legend{display:none}
+    #license{right:12px;bottom:2px}
+    #topbar{top:22px;right:12px}
+    #compass{left:12px}
+    #detail{left:12px;right:12px;width:auto;top:auto;bottom:96px}
+    #detail .dwrap{grid-template-columns:1fr}
+    #detail .side{max-height:110px;box-shadow:inset 0 -1px 0 var(--line);padding-bottom:8px}
+    #detail .main{max-height:calc(45vh - 110px);box-shadow:none}
+    #time{left:12px;right:12px}
+    #year{width:96px;font-size:15px}
+  }
+</style>
+</head>
+<body>
+<div id="globe"></div>
+
+<header>
+  <h1>Dashes</h1>
+  <p id="subtitle" data-zh="世界秘线" data-en="Esoteric currents across the Earth"></p>
+</header>
+
+<div id="topbar"><div id="langs"><button data-l="zh">中</button><span>/</span><button data-l="en">EN</button></div><div id="themes"></div></div>
+
+<div id="lines" class="panel"></div>
+<button id="unfold"></button>
+
+<div id="detail" class="panel"><button id="close" aria-label="关闭">×</button><div id="dbody"></div></div>
+
+<div id="legend">
+  <span><span class="lg k"></span><i data-i="legendKnown"></i></span>
+  <span><span class="lg l"></span><i data-i="legendLegend"></i></span>
+  <span><span class="e"></span><i data-i="legendEvent"></i></span>
+</div>
+
+<div id="time" class="panel">
+  <button id="play" aria-label="播放">▶</button>
+  <div id="year"></div>
+  <div id="track"><div class="bar"></div><div class="fill"></div><div class="knob"></div></div>
+</div>
+<div id="tip"></div>
+<div id="license"><span data-zh="© 2026 Dashes · 内容采用 " data-en="© 2026 Dashes · Content licensed under "></span><a href="https://creativecommons.org/licenses/by-nc/4.0/" target="_blank" rel="noopener">CC BY-NC 4.0</a></div>
+<button id="compass"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1"/><path d="M12 4.5 14.2 12h-4.4z" fill="var(--accent)"/><path d="M12 19.5 9.8 12h4.4z" fill="currentColor" opacity=".55"/><circle cx="12" cy="12" r="1.2" fill="var(--bg)"/></svg></button>
+
+<script src="vendor/topojson-client-3.min.js"></script>
+<script src="vendor/globe.gl-2.46.2.min.js"></script>
+<script src="data.js"></script>
+<script src="data.en.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
